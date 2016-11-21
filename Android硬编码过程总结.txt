@@ -1,0 +1,63 @@
+##Android H264硬编码过程
+1. 生成编码器并且设置相关参数
+```
+	public synchronized void open() {
+		//YUV420P的大小关系
+		byte[] yuv420 = new byte[mWidth * mHeight * 3 / 2];
+		//生成编码器并且设置相关参数
+		mediaCodec = MediaCodec.createEncoderByType("video/avc");
+		//编码格式参数设置
+		MediaFormat mediaFormat = MediaFormat.createVideoFormat(
+			"video/avc", mWidth, mHeight);
+		//设置码率,码率越低,失真越厉害
+		mediaFormat.setInteger(MediaFormat.KEY_BIT_RATE, bitrate);
+		//设置帧率
+		mediaFormat.setInteger(MediaFormat.KEY_FRAME_RATE, framerate);
+		/**设置颜色格式(I420,YV12,NV21等)
+			如:MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar*/
+		mediaFormat.setInteger(MediaFormat.KEY_COLOR_FORMAT, colorFormat);
+		//设置发送I帧的时间间隔
+		mediaFormat.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);//单位:s(秒)
+		//完成配置,启动
+		mediaCodec.configure(mediaFormat, null, null, MediaCodec.CONFIGURE_FLAT_ENCODE);
+		mediaCodec.start();
+	}
+```
+
+2. 进行编码
+```
+	public synchronized int encode(byte[] in, int offset, byte[] out, int length) {
+		int pos = 0;
+		byte[] inBuf = in;
+		int l = length;
+		/**由于Android 摄像头默认采集的数据是NV21格式,所以要
+		   转成MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar
+		   让编码器支持.*/
+		NV21toYUV420SemiPlannr(in, offset, yuv420, mWidth, mHeight);
+		try {
+			ByteBuffer[] inputBuffers = mediaCodec.getInputBuffers();
+			ByteBuffer[] outputBuffers = mediaCodec.getOutputBuffers();
+			/**
+				解码的时候,如果此处TIME_OUT非0会有个大坑,很多机子在这句卡死
+			*/
+			int inputBufferIndex = mediaCodec.dequeueInputBuffer(TIME_OUT);
+			if(inputBufferIndex >= 0){
+				ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
+				inputBuffer.clear();
+				inputBuffer.put(inBuf, offset, l);
+				/**此处getMyTime()函数维护一个递增的时间戳
+					据说此处的第四个参数不传,第一个I帧以后,
+					mediaCodec.dequeueOutputBuffer()一直返回-1,
+					-1对应原生代码的再试一遍的意思*/
+				mediaCodec.queueInputBuffer(inputBufferIndex, 0, l, getMyTime(), 0);
+			}
+			MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
+			/**
+				此处的TIME_OUT是否要传,待研究.
+			 */
+			int outBufferIndex = mediaCodec.dequeueInputBuffer(bufferInfo, TIME_OUT);
+			//待理解继续
+		}
+	}
+	
+```
